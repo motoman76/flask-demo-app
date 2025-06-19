@@ -1,0 +1,114 @@
+name: Flask Demo App CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  APP_NAME: flask-demo-app
+  REGISTRY: your-jfrog-registry.com  # We'll update this later
+  
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Test Application
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Test application
+      run: |
+        python -m pytest --version || pip install pytest
+        python -c "import app; print('App imports successfully')"
+        
+  build:
+    runs-on: ubuntu-latest
+    name: Build and Push Docker Image
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ env.APP_NAME }}:${{ github.sha }} .
+        docker build -t ${{ env.APP_NAME }}:latest .
+        
+    - name: Test Docker image
+      run: |
+        docker run --rm -d -p 5000:5000 --name test-container ${{ env.APP_NAME }}:latest
+        sleep 10
+        curl -f http://localhost:5000/health || exit 1
+        docker stop test-container
+        
+    - name: Save Docker image
+      run: |
+        docker save ${{ env.APP_NAME }}:${{ github.sha }} > flask-demo-app.tar
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-image
+        path: flask-demo-app.tar
+        retention-days: 1
+
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scan
+    needs: build
+    
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-image
+        
+    - name: Load Docker image
+      run: docker load < flask-demo-app.tar
+      
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.APP_NAME }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    needs: [test, build, security-scan]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Deploy notification
+      run: |
+        echo "🚀 Deploying Flask Demo App to staging environment"
+        echo "📦 Image: ${{ env.APP_NAME }}:${{ github.sha }}"
+        echo "🔗 This would deploy to your K3s cluster"
