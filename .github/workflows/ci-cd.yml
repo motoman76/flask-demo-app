@@ -88,14 +88,11 @@ jobs:
       uses: aquasecurity/trivy-action@master
       with:
         image-ref: ${{ env.APP_NAME }}:${{ github.sha }}
-        format: 'sarif'
-        output: 'trivy-results.sarif'
+        format: 'table'
+        exit-code: '0'  # Don't fail on vulnerabilities (for learning)
         
-    - name: Upload Trivy scan results
-      uses: github/codeql-action/upload-sarif@v2
-      if: always()
-      with:
-        sarif_file: 'trivy-results.sarif'
+    - name: Security scan complete
+      run: echo "🔒 Security scan completed - check logs above for vulnerabilities"
 
   deploy-staging:
     runs-on: ubuntu-latest
